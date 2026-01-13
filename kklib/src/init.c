@@ -345,7 +345,7 @@ void kk_free_context(void) {
 static bool kk_showtime; // false
 
 kk_decl_export kk_context_t* kk_main_start(int argc, char** argv) {
-  ref_count_table = kk_hashtable_init(1024);
+  kk_hashtable_init(&ref_count_table, 1024);
   kk_context_t* ctx = kk_get_context();
   // process kklib options
   if (argv != NULL && argc >= 1) {

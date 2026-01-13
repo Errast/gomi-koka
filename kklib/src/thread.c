@@ -597,16 +597,11 @@ kk_box_t kk_lvar_get( kk_lvar_t lvar, kk_box_t bot, kk_function_t is_gte, kk_con
 }
 
 
-kk_decl_export kk_hashtable_t kk_hashtable_init(kk_ssize_t cap) {
-  kk_hashtable_t table = (kk_hashtable_t) {
-    .len = 0,
-    .cap = cap,
-    .entries = (kk_hashtable_entry_t*) calloc(cap, sizeof(kk_hashtable_entry_t)),
-    .mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t)),
-  };
-  pthread_mutex_init(table.mutex, NULL);
-
-  return table;
+kk_decl_export void kk_hashtable_init(kk_hashtable_t* table, kk_ssize_t cap) {
+  table->len = 0;
+  table->cap = cap;
+  table->entries = (kk_hashtable_entry_t*) calloc(cap, sizeof(kk_hashtable_entry_t));
+  pthread_mutex_init(&table->mutex,NULL);
 }
 
 static kk_chain_t** kk_hashtable_lookup_racey(kk_hashtable_t* table, kk_addr_t key) {
@@ -632,19 +627,19 @@ static kk_chain_t** kk_hashtable_lookup_racey(kk_hashtable_t* table, kk_addr_t k
 }
 
 kk_decl_export kk_chain_t* kk_hashtable_lookup(kk_hashtable_t* table, kk_addr_t key) {
-  pthread_mutex_lock(table->mutex);
+  pthread_mutex_lock(&table->mutex);
   kk_chain_t** data = kk_hashtable_lookup_racey(table, key);
   if(*data == NULL) {
     *data = (kk_chain_t*) calloc(1,sizeof(kk_chain_t));
   }
   kk_chain_t* res = *data;
-  pthread_mutex_unlock(table->mutex);
+  pthread_mutex_unlock(&table->mutex);
   return res;
 }
 
 kk_decl_export void kk_hashtable_grow(kk_hashtable_t* table) {
   kk_ssize_t old_cap = table->cap;
-  kk_ssize_t cap = (table->cap *= old_cap * 2);
+  kk_ssize_t cap = (table->cap = old_cap * 2);
   kk_hashtable_entry_t* old_entries = table->entries;
   kk_hashtable_entry_t* new_entries = (table->entries = (kk_hashtable_entry_t*) calloc(cap, sizeof(kk_hashtable_entry_t)));
   table->len = 0;

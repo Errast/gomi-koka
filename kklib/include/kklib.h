@@ -61,14 +61,14 @@ typedef struct {
 typedef struct {
   kk_ssize_t len, cap;
   kk_hashtable_entry_t* entries;
-  pthread_mutex_t* mutex;
+  pthread_mutex_t mutex;
 } kk_hashtable_t;
 
-kk_decl_export kk_hashtable_t kk_hashtable_init(kk_ssize_t cap);
+kk_decl_export void kk_hashtable_init(kk_hashtable_t* table, kk_ssize_t cap);
 kk_decl_export void kk_hashtable_grow(kk_hashtable_t* table); 
 kk_decl_export kk_chain_t* kk_hashtable_lookup(kk_hashtable_t* table, kk_addr_t key);
 kk_decl_export void kk_hashtable_grow(kk_hashtable_t* table);
-kk_decl_export kk_hashtable_t ref_count_table;
+kk_decl_externc kk_hashtable_t ref_count_table;
 static inline void kk_chain_push(kk_chain_t* prev);
 
 /*--------------------------------------------------------------------------------------
