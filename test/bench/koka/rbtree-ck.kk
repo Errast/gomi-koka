@@ -37,7 +37,7 @@ fun balance2(t: tree, kv: int, vv: bool, s: tree): tree
       -> Node(Black, t, kv, vv, Node(Red, l, ky, vy, r))
 
 
-fun is-red(t : tree) : bool
+fun tree/is-red(t : tree) : bool
   match t
     Node(Red) -> True
     _         -> False

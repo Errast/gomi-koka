@@ -105,16 +105,16 @@ fun rss-float64(t : test) : float64 {
 
 fun show( test : test ) {
   val xs = if (test.err.is-empty) then [
-    "" ++ test.elapsed.core/show(2).pad-left(5) ++ "s ~" ++ test.elapsed-sdev.core/show-fixed(3),
-    "" ++ test.rss.core/show ++ "kb"
+    "" ++ test.elapsed.show(2).pad-left(5) ++ "s ~" ++ test.elapsed-sdev.show-fixed(3),
+    "" ++ test.rss.show ++ "kb"
   ] else ["error: " ++ test.err]
   ([test.name,test.lang.pad-left(5)] ++ xs).join(", ")
 }
 
 fun show-norm( test : test ) {
   val xs = if (test.err.is-empty) then [
-      "" ++ test.norm-elapsed.core/show(2).pad-left(5) ++ "x ~" ++ test.elapsed-sdev.core/show-fixed(3),
-      "" ++ test.norm-rss.core/show(2) ++ "x"
+      "" ++ test.norm-elapsed.show(2).pad-left(5) ++ "x ~" ++ test.elapsed-sdev.show-fixed(3),
+      "" ++ test.norm-rss.show(2) ++ "x"
     ] else ["error: " ++ test.err]
   ([test.name,test.lang.pad-left(5)] ++ xs).join(", ")
 }
@@ -355,7 +355,7 @@ fun test-sum( t1 : test, t2 : test) : test {
 fun execute-test( run : int, base : string, prog : string, envvars : string ) : io either<string,(float64,int)> 
   val timef= "out/time-" ++ base ++ ".txt"
   val cmd  = (if envvars.is-empty then "" else ("env " ++ envvars ++ " ")) ++
-             (if get-env("SHELL").default("").contains("zsh")
+             (if get-env-value("SHELL").default("").contains("zsh")
                 then "/usr/bin/time -l 2> " ++ timef ++ " " ++ prog
                 else "/usr/bin/time -f'%e %M' -o" ++ timef ++ " " ++ prog)
   ensure-dir("out".path)

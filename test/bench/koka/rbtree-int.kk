@@ -10,7 +10,7 @@ type tree
   Leaf
   
 
-fun is-red(t : tree) : bool
+fun tree/is-red(t : tree) : bool
   match t
     Node(Red) -> True
     _         -> False
@@ -73,7 +73,7 @@ fun fold(t : tree, b : a, f : (int, bool, a) -> a) : a
     
 
 fun make-tree(n : int) : div tree
-  fold-int( n, Leaf) fn(i,t)
+  fold( n, Leaf) fn(i,t)
     t.insert( i, i%10 == 0 )
 
 
