@@ -171,7 +171,14 @@ kk_decl_noinline kk_block_t* kk_block_check_dup(kk_block_t* b, kk_refcount_t rc0
   kk_assert_internal(b!=NULL);
   kk_assert_internal(kk_refcount_is_thread_shared(rc0)); // includes KK_STUCK
   if kk_likely(rc0 > RC_STICKY) {
-    kk_atomic_dup(b);  // decrement
+    kk_refcount_t rc = kk_atomic_dup(b);  // decrement
+    _Atomic(int64_t)* i = &kk_hashtable_lookup(&ref_count_table, (kk_addr_t) b)->i;
+    int64_t prev = *i;
+    if(rc < prev) {
+      // If this fails then someone has an even smaller refcount, so leave it be.
+      kk_atomic_cas_strong_relaxed(i, &prev, (int64_t) rc);
+    }
+    
   }
   // else sticky: no longer dup (= decrement)
   return b;

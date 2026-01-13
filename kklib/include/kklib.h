@@ -46,6 +46,31 @@
 #include "kklib/atomic.h"     // Atomic operations
 
 
+typedef struct kk_chain_s {
+  struct kk_chain_s* prev;
+  _Atomic(int64_t) i;
+} kk_chain_t;
+
+#define KK_HASHTABLE_TOMBSTONE KK_U64(0)
+
+typedef struct {
+  kk_addr_t key;
+  kk_chain_t* data;
+} kk_hashtable_entry_t;
+
+typedef struct {
+  kk_ssize_t len, cap;
+  kk_hashtable_entry_t* entries;
+  pthread_mutex_t* mutex;
+} kk_hashtable_t;
+
+kk_decl_export kk_hashtable_t kk_hashtable_init(kk_ssize_t cap);
+kk_decl_export void kk_hashtable_grow(kk_hashtable_t* table); 
+kk_decl_export kk_chain_t* kk_hashtable_lookup(kk_hashtable_t* table, kk_addr_t key);
+kk_decl_export void kk_hashtable_grow(kk_hashtable_t* table);
+kk_decl_export kk_hashtable_t ref_count_table;
+static inline void kk_chain_push(kk_chain_t* prev);
+
 /*--------------------------------------------------------------------------------------
   Tags
 --------------------------------------------------------------------------------------*/
@@ -583,6 +608,7 @@ static inline void kk_block_init(kk_block_t* b, kk_ssize_t size, kk_ssize_t scan
   kk_unused(size);
   kk_assert_internal(scan_fsize >= 0 && scan_fsize < KK_SCAN_FSIZE_MAX);
   kk_assert_internal(cpath >= 0 && cpath <= KK_CPATH_MAX);
+  // kk_chain_push(kk_hashtable_lookup(&ref_count_table,(kk_addr_t) b));
   kk_header_init(&b->header, scan_fsize, cpath, tag);
 }
 
@@ -608,6 +634,7 @@ static inline kk_block_t* kk_block_alloc_at(kk_reuse_t at, kk_ssize_t size, kk_s
   kk_block_t* b;
   if (at==kk_reuse_null) {
     b = (kk_block_t*)kk_malloc_small(size, ctx);
+    kk_chain_push(kk_hashtable_lookup(&ref_count_table,(kk_addr_t) b));
   }
   else {
     kk_assert_internal(kk_block_is_unique(at) || kk_block_field_idx(at) == KK_FIELD_IDX_LAZY_BLOCKED); // TODO: check usable size of `at`
@@ -621,6 +648,7 @@ static inline kk_block_t* kk_block_alloc(kk_ssize_t size, kk_ssize_t scan_fsize,
   kk_assert_internal(scan_fsize >= 0 && scan_fsize < KK_SCAN_FSIZE_MAX);
   kk_assert(!kk_tag_is_raw(tag) || scan_fsize == 0);
   kk_block_t* b = (kk_block_t*)kk_malloc_small(size, ctx);
+  kk_chain_push(kk_hashtable_lookup(&ref_count_table,(kk_addr_t) b));
   kk_block_init(b, size, scan_fsize, 0, tag);
   return b;
 }
@@ -633,12 +661,14 @@ static inline kk_block_t* kk_block_alloc_raw(kk_ssize_t size, kk_tag_t tag, kk_c
 static inline kk_block_t* kk_block_alloc_any(kk_ssize_t size, kk_ssize_t scan_fsize, kk_tag_t tag, kk_context_t* ctx) {
   kk_assert_internal(scan_fsize >= 0 && scan_fsize < KK_SCAN_FSIZE_MAX);
   kk_block_t* b = (kk_block_t*)kk_malloc(size, ctx);
+  kk_chain_push(kk_hashtable_lookup(&ref_count_table,(kk_addr_t) b));
   kk_block_init(b, size, scan_fsize, 0, tag);
   return b;
 }
 
 static inline kk_block_large_t* kk_block_large_alloc(kk_ssize_t size, kk_ssize_t scan_fsize, kk_tag_t tag, kk_context_t* ctx) {
   kk_block_large_t* b = (kk_block_large_t*)kk_malloc(size, ctx);
+  kk_chain_push(kk_hashtable_lookup(&ref_count_table,(kk_addr_t) b));
   kk_block_large_init(b, size, scan_fsize, 0, tag);
   return b;
 }
@@ -683,7 +713,6 @@ kk_decl_export void        kk_block_check_drop(kk_block_t* b, kk_refcount_t rc, 
 kk_decl_export void        kk_block_check_decref(kk_block_t* b, kk_refcount_t rc, kk_context_t* ctx);
 kk_decl_export kk_block_t* kk_block_check_dup(kk_block_t* b, kk_refcount_t rc);
 kk_decl_export kk_reuse_t  kk_block_check_drop_reuse(kk_block_t* b, kk_refcount_t rc0, kk_context_t* ctx);
-
 // Dup a reference.
 static inline kk_block_t* kk_block_dup(kk_block_t* b) {
   kk_assert_internal(kk_block_is_valid(b));
@@ -692,7 +721,12 @@ static inline kk_block_t* kk_block_dup(kk_block_t* b) {
     return kk_block_check_dup(b, rc);                 // thread-shared or sticky (overflow) ?
   }
   else {
-    kk_block_refcount_set(b, kk_refcount_inc(rc));
+    kk_refcount_t rc_ = kk_refcount_inc(rc);
+    kk_block_refcount_set(b, rc_);
+    _Atomic(int64_t)* i = &kk_hashtable_lookup(&ref_count_table, (kk_addr_t) b)->i;
+    if( rc_ > *i) {
+      *i = rc;
+    }
     return b;
   }
 }
@@ -1396,6 +1430,45 @@ typedef kk_box_t kk_field_addr_t;
 #include "kklib/process.h"    // Process info (memory usage, run time etc.)
 #include "kklib/random.h"
 #include "kklib/thread.h"
+
+// SplitMix64
+// Doesn't work on 128-bit archs, womp womp
+#if KK_ADDR_BITS > 64
+#error "womp womp"
+#endif 
+static inline uint64_t kk_hash_pointer(kk_addr_t ptr) {
+  uint64_t z = (uint64_t)ptr + KK_U64(0x9E3779B97F4A7C15);
+  z = (z ^ (z >> 30)) * KK_U64(0xBF58476D1CE4E5B9);
+  z = (z ^ (z >> 27)) * KK_U64(0x94D049BB133111EB);
+  return z ^ (z >> 31);
+}
+
+
+
+// The same address can't be simultaneously allocated from 2 threads, so this can't race.
+static inline void kk_chain_push(kk_chain_t* prev) {
+  kk_chain_t* prev_entry = (kk_chain_t*) malloc(sizeof(kk_chain_t));
+  *prev_entry = *prev;
+  *prev = (kk_chain_t) { .prev = prev_entry, .i = 0 };
+}
+
+static inline void kk_print_results(kk_hashtable_t* table) {
+  ssize_t c = 0;
+  ssize_t uniq = 0;
+  for(kk_ssize_t i = 0; i < table->cap; i++) {
+    kk_chain_t* chain = table->entries[i].data;
+    while(chain) {
+      printf("%lu,", chain->i);
+      c++;
+      if(chain->i == 0) {
+        uniq++;
+      }
+      chain = chain->prev;
+    }
+  }
+  printf("\ntotal %lu, len %lu, uniq %lu", c, table->len, uniq);
+}
+
 
 
 

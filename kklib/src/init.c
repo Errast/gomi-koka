@@ -345,6 +345,7 @@ void kk_free_context(void) {
 static bool kk_showtime; // false
 
 kk_decl_export kk_context_t* kk_main_start(int argc, char** argv) {
+  ref_count_table = kk_hashtable_init(1024);
   kk_context_t* ctx = kk_get_context();
   // process kklib options
   if (argv != NULL && argc >= 1) {
@@ -385,6 +386,7 @@ kk_decl_export void  kk_main_end(kk_context_t* ctx) {
                     (peak_rss > 10*1024*1024 ? peak_rss/(1024*1024) : peak_rss/1024),
                     (peak_rss > 10*1024*1024 ? "mb" : "kb") );
   }
+  kk_print_results(&ref_count_table);
 }
 
 

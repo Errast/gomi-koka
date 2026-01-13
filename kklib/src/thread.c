@@ -595,3 +595,68 @@ kk_box_t kk_lvar_get( kk_lvar_t lvar, kk_box_t bot, kk_function_t is_gte, kk_con
   kk_box_drop(lvar,ctx);
   return result;
 }
+
+
+kk_decl_export kk_hashtable_t kk_hashtable_init(kk_ssize_t cap) {
+  kk_hashtable_t table = (kk_hashtable_t) {
+    .len = 0,
+    .cap = cap,
+    .entries = (kk_hashtable_entry_t*) calloc(cap, sizeof(kk_hashtable_entry_t)),
+    .mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t)),
+  };
+  pthread_mutex_init(table.mutex, NULL);
+
+  return table;
+}
+
+static kk_chain_t** kk_hashtable_lookup_racey(kk_hashtable_t* table, kk_addr_t key) {
+  uint64_t hash = kk_hash_pointer(key);
+  uint64_t mask = table->cap - 1;
+
+  kk_ssize_t idx = hash & mask;
+  for(; table->entries[idx].key != KK_HASHTABLE_TOMBSTONE; idx = (idx + 1) & mask) {
+    if(table->entries[idx].key == key) {
+      goto found;      
+    }
+  }
+
+  if(table->len >= table->cap / 2) {
+    kk_hashtable_grow(table);
+    return kk_hashtable_lookup_racey(table, key);
+  }
+
+  table->len++;
+  table->entries[idx].key = key;
+ found:
+  return &table->entries[idx].data;
+}
+
+kk_decl_export kk_chain_t* kk_hashtable_lookup(kk_hashtable_t* table, kk_addr_t key) {
+  pthread_mutex_lock(table->mutex);
+  kk_chain_t** data = kk_hashtable_lookup_racey(table, key);
+  if(*data == NULL) {
+    *data = (kk_chain_t*) calloc(1,sizeof(kk_chain_t));
+  }
+  kk_chain_t* res = *data;
+  pthread_mutex_unlock(table->mutex);
+  return res;
+}
+
+kk_decl_export void kk_hashtable_grow(kk_hashtable_t* table) {
+  kk_ssize_t old_cap = table->cap;
+  kk_ssize_t cap = (table->cap *= old_cap * 2);
+  kk_hashtable_entry_t* old_entries = table->entries;
+  kk_hashtable_entry_t* new_entries = (table->entries = (kk_hashtable_entry_t*) calloc(cap, sizeof(kk_hashtable_entry_t)));
+  table->len = 0;
+
+  for(kk_ssize_t i = 0; i < old_cap; i++) {
+    if(old_entries[i].key == KK_HASHTABLE_TOMBSTONE) {
+      continue;
+    }
+    *kk_hashtable_lookup_racey(table, old_entries[i].key) = old_entries[i].data;
+  }
+
+  free(old_entries);
+}
+
+kk_hashtable_t ref_count_table = { 0 };
